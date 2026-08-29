@@ -513,4 +513,5 @@ def handle_all_callbacks(call):
             "Payment karne ke baad screenshot aur UTR number support team <b>@GETSUPPORT99</b> ko send karein."
         )
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("📩 Send Proof to Suppo        
+        markup.add(types.InlineKeyboardButton("📩 Send Proof to Support", url="https://t.me/GETSUPPORT99"))
+
