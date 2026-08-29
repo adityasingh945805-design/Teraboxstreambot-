@@ -8,12 +8,14 @@ BOT_USERNAME = "Mystreamterabot"
 ADMIN_ID = 7712648594
 UPI_ID = "9458050517@kotakbank"
 
-# CHANNELS CONFIG
-MAIN_CHANNEL_INVITE = "https://t.me/+3H677HppeqQzMjdl"
+JOIN_CHANNEL_INVITE = "https://t.me/+3H677HppeqQzMjd1"
 PACK_10K_PRIVATE_LINK = "https://t.me/kvjuufgv"
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 DATA_FILE = "bot_data.json"
+
+default_data = {
+    "
 
 try:
     bot_desc = (
