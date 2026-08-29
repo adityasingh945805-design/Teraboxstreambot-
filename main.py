@@ -1,3 +1,22 @@
+import os
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is Running Live 24/7!"
+
+def run():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.daemon = True
+    t.start()
+    
 import telebot, json, os, uuid, time, threading, urllib.parse, datetime
 from telebot import types
 from threading import Thread
@@ -514,4 +533,14 @@ def handle_all_callbacks(call):
         )
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📩 Send Proof to Support", url="https://t.me/GETSUPPORT99"))
-
+if __name__ == "__main__":
+    print("Starting Flask Web Server...")
+    keep_alive()
+    print("Bot Polling Initialized...")
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=0, timeout=20)
+        except Exception as e:
+            print("Polling error, retrying in 5 seconds:", e)
+            time.sleep(5)
+            
