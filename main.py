@@ -17,25 +17,11 @@ def keep_alive():
     t.daemon = True
     t.start()
     
+
+pkill -f python
+cat << 'EOF' > main.py
 import telebot, json, os, uuid, time, threading, urllib.parse, datetime
 from telebot import types
-from threading import Thread
-from flask import Flask
-
-# --- FLASK KEEP-ALIVE SERVER FOR RENDER ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is Running Live 24/7!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.daemon = True
-    t.start()
 
 BOT_TOKEN = "8930055066:AAGBiKXyZolKqB3Kv98LLEpLsFgvvKx-OOo"
 BOT_USERNAME = "Mystreamterabot"
@@ -123,8 +109,8 @@ def is_admin(user_id):
 def is_premium(user_id):
     if user_id == ADMIN_ID: return True
     exp = data["premium"].get(str(user_id))
-    if exp and (exp == "lifetime" or time.time() < exp): return True
-    elif exp and exp != "lifetime":
+    if exp and time.time() < exp: return True
+    elif exp:
         del data["premium"][str(user_id)]
         save_data()
     return False
@@ -301,7 +287,7 @@ def show_vip_plans(chat_id, message_id=None, code="", is_strict_premium=False):
     else:
         bot.send_message(chat_id, vip_text, reply_markup=markup, parse_mode="HTML")
 
-# --- ADMIN COMMANDS ---
+# ADMIN ANALYTICS & STATS COMMANDS
 @bot.message_handler(commands=['stats'])
 def handle_stats(m):
     if not is_admin(m.from_user.id): return
@@ -321,6 +307,22 @@ def handle_stats(m):
         f"🛡️ Used Anti-Fraud UTRs: <b>{len(data.get('used_utrs', []))}</b>"
     )
     bot.reply_to(m, stats_msg, parse_mode="HTML")
+
+@bot.message_handler(commands=['premiumstats'])
+def handle_premium_stats(m):
+    if not is_admin(m.from_user.id): return
+    pre_dict = data.get("premium", {})
+    if not pre_dict:
+        bot.reply_to(m, "ℹ️ No active VIP members currently.")
+        return
+    
+    lines = ["👑 <b>Active VIP Members List:</b>\n"]
+    now = time.time()
+    for uid, exp in list(pre_dict.items())[:25]:
+        rem_hours = max(0, int((exp - now) // 3600))
+        lines.append(f"• User: <code>{uid}</code> (Expires in {rem_hours}h / {rem_hours//24}d)")
+    
+    bot.reply_to(m, "\n".join(lines), parse_mode="HTML")
 
 @bot.message_handler(commands=['profit'])
 def handle_profit(m):
@@ -364,12 +366,42 @@ def handle_broadcast(m):
 def handle_myid(m):
     bot.reply_to(m, f"🆔 Aapki Telegram User ID: <code>{m.from_user.id}</code>", parse_mode="HTML")
 
+@bot.message_handler(commands=['make_pre'])
+def handle_make_pre(m):
+    if not is_admin(m.from_user.id): return
+    args = m.text.split()
+    if len(args) < 2:
+        bot.reply_to(m, "Usage: <code>/make_pre FILE_CODE</code>\nExample: <code>/make_pre a1b2c3d4</code>", parse_mode="HTML")
+        return
+    code = args[1].strip()
+    if code in data["files"]:
+        data["files"][code]["is_premium"] = True
+        save_data()
+        bot.reply_to(m, f"🔒 <b>File <code>{code}</code> set to STRICT PREMIUM ONLY!</b>\n(Ab sirf VIP users hi ise access kar sakenge)", parse_mode="HTML")
+    else:
+        bot.reply_to(m, "❌ Code not found in database.")
+
+@bot.message_handler(commands=['make_free'])
+def handle_make_free(m):
+    if not is_admin(m.from_user.id): return
+    args = m.text.split()
+    if len(args) < 2:
+        bot.reply_to(m, "Usage: <code>/make_free FILE_CODE</code>", parse_mode="HTML")
+        return
+    code = args[1].strip()
+    if code in data["files"]:
+        data["files"][code]["is_premium"] = False
+        save_data()
+        bot.reply_to(m, f"🔓 <b>File <code>{code}</code> set to FREE/TRIAL mode!</b>", parse_mode="HTML")
+    else:
+        bot.reply_to(m, "❌ Code not found.")
+
 @bot.message_handler(commands=['batch'])
 def handle_batch(m):
     if not is_admin(m.from_user.id): return
     cid = m.chat.id
     user_batches[cid] = []
-    bot.reply_to(m, "📦 <b>Batch Mode Started!</b>\nAb ek ek karke media upload karein. Jab complete ho jaye toh <code>/done</code> send karein.", parse_mode="HTML")
+    bot.reply_to(m, "📦 <b>Batch Mode Started!</b>\nAb ek ek karke media (Photos/Videos) upload karein. Jab complete ho jaye toh <code>/done</code> send karein.", parse_mode="HTML")
 
 @bot.message_handler(commands=['done'])
 def handle_done(m):
@@ -389,13 +421,63 @@ def handle_done(m):
         msg = (
             f"✅ <b>Batch Created Successfully! ({len(files_list)} items)</b>\n\n"
             f"📁 <b>Code:</b> <code>{code}</code>\n"
+            f"🔒 Make Premium: <code>/make_pre {code}</code>\n\n"
             f"⚡ <b>Link:</b>\n<code>{link}</code>"
         )
         bot.reply_to(m, msg, reply_markup=markup, parse_mode="HTML")
     else:
         bot.reply_to(m, "❌ No batch in progress. Use /batch first.")
 
-# --- START COMMAND ---
+@bot.message_handler(commands=['add_bal'])
+def handle_add_bal(m):
+    if not is_admin(m.from_user.id): return
+    args = m.text.split()
+    if len(args) < 3:
+        bot.reply_to(m, "Usage: <code>/add_bal USER_ID AMOUNT</code>", parse_mode="HTML")
+        return
+    try:
+        amount = float(args[2].strip())
+        target_id_str = args[1].strip()
+        wallet = add_to_wallet(target_id_str, amount)
+        bot.reply_to(m, f"✅ <b>Added ₹{amount:.2f} to {target_id_str}!</b>\nNew Balance: ₹{wallet['balance']:.2f}", parse_mode="HTML")
+        try:
+            bot.send_message(int(target_id_str), f"🎉 <b>Bonus Added:</b> ₹{amount:.2f}\nTotal Balance: ₹{wallet['balance']:.2f}", parse_mode="HTML")
+        except Exception: pass
+    except Exception as e:
+        bot.reply_to(m, f"Error: {e}")
+
+@bot.message_handler(commands=['add_token'])
+def handle_add_token(m):
+    if not is_admin(m.from_user.id): return
+    args = m.text.split()
+    if len(args) < 3:
+        bot.reply_to(m, "Usage: <code>/add_token USER_ID TOKENS</code>", parse_mode="HTML")
+        return
+    try:
+        tokens_to_add = int(args[2].strip())
+        target_id_str = args[1].strip()
+        wallet = add_to_wallet(target_id_str, tokens_to_add / 2.0)
+        bot.reply_to(m, f"✅ <b>Added {tokens_to_add} Tokens to {target_id_str}!</b>", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(m, f"Error: {e}")
+
+@bot.message_handler(commands=['reset_user'])
+def handle_reset_user(m):
+    if not is_admin(m.from_user.id): return
+    args = m.text.split()
+    if len(args) < 2: return
+    target_id_str = args[1].strip()
+    try:
+        target_id = int(target_id_str)
+        if target_id in data["users"]: data["users"].remove(target_id)
+        if target_id_str in data["user_wallets"]: del data["user_wallets"][target_id_str]
+        if target_id_str in data["user_sessions"]: del data["user_sessions"][target_id_str]
+        if target_id_str in data["premium"]: del data["premium"][target_id_str]
+        save_data()
+        bot.reply_to(m, f"✅ User {target_id} Reset!")
+    except Exception as e:
+        bot.reply_to(m, f"Error: {e}")
+
 @bot.message_handler(commands=['start'])
 def handle_start(m):
     uid = m.from_user.id
@@ -444,95 +526,445 @@ def handle_start(m):
     # Reward Referrer (Rs 5)
     if wallet.get("referred_by") and not wallet.get("reward_given"):
         ref_uid = str(wallet["referred_by"])
-        ref_wallet = get_wallet(ref_uid)
-        ref_wallet["balance"] = ref_wallet.get("balance", 0.0) + 5.0
-        ref_wallet["total_ref"] = ref_wallet.get("total_ref", 0) + 1
-        ref_wallet["tokens"] = int(ref_wallet["balance"] * 2)
-        wallet["reward_given"] = True
-        save_data()
-        try:
-            bot.send_message(
-                int(ref_uid),
-                f"🎉 <b>New Referral Joined!</b>\n\nAapko mile: <b>₹5.00 (+10 Tokens)</b>\nWallet Balance: <b>₹{ref_wallet['balance']:.2f}</b>",
-                parse_mode="HTML"
-            )
-        except Exception: pass
+        if ref_uid in data["user_wallets"]:
+            add_to_wallet(ref_uid, 5.0)
+            data["user_wallets"][ref_uid]["total_ref"] = data["user_wallets"][ref_uid].get("total_ref", 0) + 1
+            wallet["reward_given"] = True
+            save_data()
+            try:
+                bot.send_message(
+                    int(ref_uid),
+                    f"🎉 <b>New Referral Joined!</b>\n\n💰 Added: <b>+₹5.00 Cash</b>",
+                    parse_mode="HTML"
+                )
+            except Exception: pass
 
-    # Deep Link File Delivery
-    if file_code and file_code in data["files"]:
-        f_item = data["files"][file_code]
-        if f_item.get("is_premium") and not is_premium(uid):
+    if file_code:
+        if file_code not in data["files"]:
+            bot.reply_to(m, "❌ Link expire ya delete ho chuka hai.")
+            return
+
+        file_item = data["files"][file_code]
+        
+        if file_item.get("is_premium") and not is_premium(uid):
             show_vip_plans(m.chat.id, code=file_code, is_strict_premium=True)
             return
 
-        can_dl, count = check_and_increment_weekly_limit(uid)
-        if not can_dl:
+        allowed, current_count = check_and_increment_weekly_limit(uid)
+        if not allowed:
             show_two_choices_limit_screen(m.chat.id, code=file_code)
             return
 
         deliver_files(m.chat.id, file_code)
         return
 
-    # Normal Welcome Message
-    bot.reply_to(
-        m,
-        f"👋 <b>Namaste {m.from_user.first_name}!</b>\n\n"
-        "🚀 <b>Fast Terabox & Stream Hub me aapka swagat hai.</b>\n\n"
-        "🎁 <b>Free Weekly Limit:</b> 2 Files / Week\n"
-        "💰 <b>Referral Bonus:</b> ₹5.00 per invite\n\n"
-        "Niche diye gaye options explore karein 👇",
-        reply_markup=get_main_menu_markup(),
-        parse_mode="HTML"
+    welcome_text = (
+        f"👋 <b>Welcome {m.from_user.first_name}!</b>\n\n"
+        f"🎁 <b>You have 2 free trial access to any video/photo weekly.</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👉 <b>Join Our VIP Updates Channel:</b>\n"
+        f"🔗 <b><a href='{MAIN_CHANNEL_INVITE}'>{MAIN_CHANNEL_INVITE}</a></b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🚀 <i>Earn real cash by inviting friends (1st Withdraw @ ₹50 only)!</i>"
     )
+    bot.send_message(m.chat.id, welcome_text, reply_markup=get_main_menu_markup(), parse_mode="HTML", disable_web_page_preview=True)
 
-# --- CALLBACK QUERY HANDLER ---
 @bot.callback_query_handler(func=lambda call: True)
-def handle_all_callbacks(call):
+def handle_callback(call):
     uid = call.from_user.id
     cid = call.message.chat.id
     mid = call.message.message_id
-    cd = call.data
+    data_str = call.data
 
-    if cd.startswith("verify_sub_"):
-        passed, _ = check_force_sub(uid)
-        if passed:
-            bot.answer_callback_query(call.id, "✅ Channels Verified!")
-            code = cd.replace("verify_sub_", "")
+    try:
+        if data_str.startswith("verify_sub_"):
+            code = data_str.replace("verify_sub_", "")
+            passed, unsub_list = check_force_sub(uid)
+            if not passed:
+                bot.answer_callback_query(call.id, "❌ Pehle dono channel join karein!", show_alert=True)
+                return
+            
+            bot.answer_callback_query(call.id, "✅ Verified!")
+            try: bot.delete_message(cid, mid)
+            except Exception: pass
+
+            wallet = get_wallet(uid)
+            if wallet.get("referred_by") and not wallet.get("reward_given"):
+                ref_uid = str(wallet["referred_by"])
+                if ref_uid in data["user_wallets"]:
+                    add_to_wallet(ref_uid, 5.0)
+                    data["user_wallets"][ref_uid]["total_ref"] = data["user_wallets"][ref_uid].get("total_ref", 0) + 1
+                    wallet["reward_given"] = True
+                    save_data()
+                    try:
+                        bot.send_message(int(ref_uid), f"🎉 <b>Referral Verified!</b>\n\n💰 Added: <b>+₹5.00 Cash</b>", parse_mode="HTML")
+                    except Exception: pass
+
             if code != "none" and code in data["files"]:
+                file_item = data["files"][code]
+                if file_item.get("is_premium") and not is_premium(uid):
+                    show_vip_plans(cid, code=code, is_strict_premium=True)
+                    return
+                allowed, _ = check_and_increment_weekly_limit(uid)
+                if not allowed:
+                    show_two_choices_limit_screen(cid, code=code)
+                    return
                 deliver_files(cid, code)
             else:
-                try: bot.delete_message(cid, mid)
+                welcome_text = (
+                    f"🎁 <b>You have 2 free trial access to any video/photo weekly.</b>\n\n"
+                    f"👉 <b>Official Channel:</b> {MAIN_CHANNEL_INVITE}"
+                )
+                bot.send_message(cid, welcome_text, reply_markup=get_main_menu_markup(), parse_mode="HTML", disable_web_page_preview=True)
+
+        elif data_str.startswith("menu_vip_code_"):
+            code = data_str.replace("menu_vip_code_", "")
+            show_vip_plans(cid, message_id=mid, code=code)
+
+        elif data_str.startswith("back_limit_"):
+            code = data_str.replace("back_limit_", "")
+            show_two_choices_limit_screen(cid, message_id=mid, code=code)
+
+        elif data_str == "menu_refer":
+            wallet = get_wallet(uid)
+            ref_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
+            min_w = get_min_withdraw_amount(uid)
+            
+            withdraw_info = f"• 💳 <b>1st Withdrawal:</b> ₹50 direct to UPI\n• ⚡ <b>Next Withdrawals:</b> ₹100 direct to UPI"
+            
+            refer_text = (
+                f"🎁 <b>Refer & Earn Program (FREE VIP)</b>\n\n"
+                f"• 💰 <b>Reward:</b> ₹5.00 (10 Tokens) per Refer\n"
+                f"{withdraw_info}\n\n"
+                f"📊 <b>Your Wallet:</b>\n"
+                f"👥 Total Invites: <b>{wallet.get('total_ref', 0)} users</b>\n"
+                f"💵 Total Balance: <b>₹{wallet.get('balance', 0.0):.2f}</b> (<code>{wallet.get('tokens', 0)} Tokens</code>)\n"
+                f"🎯 Next Minimum Cashout: <b>₹{min_w:.0f}</b>\n\n"
+                f"🔗 <b>Your Referral Link:</b>\n<code>{ref_link}</code>"
+            )
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("💳 Withdraw Cash", callback_data="menu_withdraw"),
+                types.InlineKeyboardButton("🪙 Redeem Tokens for VIP", callback_data="menu_redeem")
+            )
+            markup.add(types.InlineKeyboardButton("🔙 Back", callback_data="menu_home"))
+            bot.edit_message_text(refer_text, cid, mid, reply_markup=markup, parse_mode="HTML")
+
+        elif data_str == "menu_home":
+            welcome_text = (
+                f"👋 <b>Main Dashboard</b>\n\n"
+                f"🎁 <b>You have 2 free trial access to any video/photo weekly.</b>\n"
+                f"👉 <b>Official Channel:</b> {MAIN_CHANNEL_INVITE}"
+            )
+            bot.edit_message_text(welcome_text, cid, mid, reply_markup=get_main_menu_markup(), parse_mode="HTML", disable_web_page_preview=True)
+
+        elif data_str == "menu_vip":
+            show_vip_plans(cid, message_id=mid)
+
+        elif data_str == "menu_withdraw":
+            wallet = get_wallet(uid)
+            bal = wallet.get("balance", 0.0)
+            min_required = get_min_withdraw_amount(uid)
+            
+            if bal < min_required:
+                is_first = (wallet.get("withdraw_count", 0) == 0)
+                notice = f"1st withdrawal limit is ₹50" if is_first else f"Minimum withdrawal limit is ₹100"
+                bot.answer_callback_query(call.id, f"❌ {notice}. Your balance: ₹{bal:.2f}", show_alert=True)
+                return
+            
+            data["user_sessions"][str(uid)] = {"mode": "withdraw", "amount": bal}
+            save_data()
+            bot.answer_callback_query(call.id)
+            cancel_markup = types.InlineKeyboardMarkup()
+            cancel_markup.add(types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_req"))
+            bot.send_message(cid, f"💳 <b>Enter your UPI ID to withdraw ₹{bal:.2f}:</b>", reply_markup=cancel_markup, parse_mode="HTML")
+
+        elif data_str == "menu_redeem":
+            wallet = get_wallet(uid)
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                types.InlineKeyboardButton("⚡ VIP 3 Days — 98 Tokens", callback_data="redeem_plan_49"),
+                types.InlineKeyboardButton("👑 VIP 1 Month — 198 Tokens", callback_data="redeem_plan_99"),
+                types.InlineKeyboardButton("♾️ VIP Lifetime — 498 Tokens", callback_data="redeem_plan_249"),
+                types.InlineKeyboardButton("🔥 10k Videos Pack — 198 Tokens", callback_data="redeem_pack_10k"),
+                types.InlineKeyboardButton("🔙 Back", callback_data="menu_home")
+            )
+            bot.edit_message_text(f"🪙 <b>Redeem Tokens for VIP</b>\nAvailable: <b>{wallet.get('tokens', 0)} Tokens (₹{wallet.get('balance', 0.0):.2f})</b>", cid, mid, reply_markup=markup, parse_mode="HTML")
+
+        elif data_str.startswith("redeem_"):
+            plan_key = data_str.replace("redeem_", "")
+            plan = PLANS.get(plan_key)
+            if not plan: return
+            wallet = get_wallet(uid)
+            req_rs = plan["amount"]
+            if wallet.get("tokens", 0) < plan["tokens"]:
+                bot.answer_callback_query(call.id, f"❌ Need {plan['tokens']} Tokens.", show_alert=True)
+                return
+
+            if deduct_from_wallet(uid, req_rs):
+                if plan_key == "pack_10k":
+                    bot.answer_callback_query(call.id, "🎉 10K Pack Unlocked!")
+                    bot.send_message(
+                        cid, 
+                        f"🎉 <b>10,000+ Direct Videos Pack Unlocked!</b>\n\n"
+                        f"👉 <b><a href='{PACK_10K_PRIVATE_LINK}'>Click Here to Access 10k Videos Channel</a></b>",
+                        reply_markup=get_main_menu_markup(),
+                        parse_mode="HTML"
+                    )
+                else:
+                    days = plan["days"]
+                    data["premium"][str(uid)] = time.time() + (days * 86400)
+                    save_data()
+                    bot.answer_callback_query(call.id, "🎉 VIP Activated!")
+                    bot.send_message(cid, f"🎉 <b>VIP Activated ({days} Days)!</b>", reply_markup=get_main_menu_markup(), parse_mode="HTML")
+
+        elif data_str.startswith("buy_"):
+            parts = data_str.split("_")
+            plan_key = f"{parts[1]}_{parts[2]}"
+            code = parts[3] if len(parts) > 3 and parts[3] != "none" else ""
+            plan = PLANS.get(plan_key)
+            if not plan: return
+
+            data["user_sessions"][str(uid)] = {"mode": "payment", "plan_key": plan_key, "code": code}
+            save_data()
+
+            amt = plan["amount"]
+            upi_url = f"upi://pay?pa={UPI_ID}&pn=BotVIP&am={amt}&cu=INR"
+            qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(upi_url)}"
+
+            bot.answer_callback_query(call.id)
+            try: bot.delete_message(cid, mid)
+            except Exception: pass
+
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_req"))
+            bot.send_photo(
+                cid,
+                qr_url,
+                caption=f"👑 <b>Unlock: {plan['name']}</b>\n\n💰 Pay: <b>₹{amt}</b> to UPI:\n<code>{UPI_ID}</code>\n\n👇 Payment karke <b>Screenshot ya 12-digit UTR</b> send karein:",
+                reply_markup=markup,
+                parse_mode="HTML"
+            )
+
+        elif data_str == "cancel_req":
+            if str(uid) in data["user_sessions"]:
+                del data["user_sessions"][str(uid)]
+                save_data()
+            bot.answer_callback_query(call.id, "Cancelled.")
+            try: bot.delete_message(cid, mid)
+            except Exception: pass
+            bot.send_message(cid, "❌ Cancelled.", reply_markup=get_main_menu_markup())
+
+        elif data_str.startswith("adm_app_"):
+            if not is_admin(uid): return
+            req_id = data_str.replace("adm_app_", "")
+            req = data["pending_requests"].get(req_id)
+            if not req:
+                bot.answer_callback_query(call.id, "Already processed.")
+                return
+
+            target_uid = req["user_id"]
+            plan_key = req.get("plan_key", "")
+            target_code = req.get("code")
+            plan_amt = req.get("amount", 0.0)
+            
+            data["total_revenue"] = data.get("total_revenue", 0.0) + plan_amt
+            del data["pending_requests"][req_id]
+            save_data()
+
+            bot.answer_callback_query(call.id, "✅ Request Approved!")
+            try: bot.edit_message_caption(caption=f"✅ <b>APPROVED & DELIVERED</b> (<code>{target_uid}</code>)", chat_id=cid, message_id=mid, parse_mode="HTML")
+            except Exception: pass
+
+            if plan_key == "pack_10k":
+                try:
+                    bot.send_message(
+                        target_uid,
+                        f"🎉 <b>Badhaai Ho! 10,000+ Direct Videos Pack Unlock Ho Gaya Hai!</b>\n\n"
+                        f"👉 <b><a href='{PACK_10K_PRIVATE_LINK}'>Click Here to Access 10k Direct Videos</a></b>",
+                        reply_markup=get_main_menu_markup(),
+                        parse_mode="HTML"
+                    )
+                except Exception as ex:
+                    print("User notify error:", ex)
+            else:
+                days = req["plan_days"]
+                data["premium"][str(target_uid)] = time.time() + (days * 86400)
+                save_data()
+                try:
+                    bot.send_message(target_uid, f"🎉 <b>VIP Activated ({days} Days)!</b>\nUnlimited downloads active.", reply_markup=get_main_menu_markup(), parse_mode="HTML")
+                    if target_code: deliver_files(target_uid, target_code)
+                except Exception as ex:
+                    print("User notify error:", ex)
+
+        elif data_str.startswith("adm_rej_"):
+            if not is_admin(uid): return
+            req_id = data_str.replace("adm_rej_", "")
+            if req_id in data["pending_requests"]:
+                target_uid = data["pending_requests"][req_id]["user_id"]
+                del data["pending_requests"][req_id]
+                save_data()
+                bot.answer_callback_query(call.id, "Rejected.")
+                try: bot.edit_message_caption(caption="❌ <b>PAYMENT REJECTED</b>", chat_id=cid, message_id=mid, parse_mode="HTML")
                 except Exception: pass
-                bot.send_message(cid, "✅ Verified! Niche menu select karein:", reply_markup=get_main_menu_markup())
+                try: bot.send_message(target_uid, "❌ Payment reject ho gaya. Contact: @GETSUPPORT99", parse_mode="HTML")
+                except Exception: pass
+
+        elif data_str.startswith("wdr_app_"):
+            if not is_admin(uid): return
+            w_id = data_str.replace("wdr_app_", "")
+            w_req = data["withdraw_requests"].get(w_id)
+            if not w_req: return
+            
+            data["total_withdrawn"] = data.get("total_withdrawn", 0.0) + w_req['amount']
+            del data["withdraw_requests"][w_id]
+            save_data()
+            
+            bot.answer_callback_query(call.id, "Paid!")
+            try: bot.edit_message_text(f"✅ <b>WITHDRAWAL PAID</b> (₹{w_req['amount']:.2f})", cid, mid, parse_mode="HTML")
+            except Exception: pass
+            try: bot.send_message(w_req["user_id"], f"🎉 ₹{w_req['amount']:.2f} transferred to <code>{w_req['upi']}</code>!", parse_mode="HTML")
+            except Exception: pass
+
+        elif data_str.startswith("wdr_rej_"):
+            if not is_admin(uid): return
+            w_id = data_str.replace("wdr_rej_", "")
+            w_req = data["withdraw_requests"].get(w_id)
+            if not w_req: return
+            add_to_wallet(str(w_req["user_id"]), w_req["amount"])
+            user_w = get_wallet(w_req["user_id"])
+            if user_w.get("withdraw_count", 0) > 0:
+                user_w["withdraw_count"] -= 1
+            del data["withdraw_requests"][w_id]
+            save_data()
+            bot.answer_callback_query(call.id, "Refunded.")
+            try: bot.edit_message_text("❌ <b>WITHDRAWAL REJECTED (Refunded)</b>", cid, mid, parse_mode="HTML")
+            except Exception: pass
+
+    except Exception as e:
+        print("Callback error:", e)
+
+# PROOF / WITHDRAWAL HANDLER
+@bot.message_handler(func=lambda m: str(m.from_user.id) in data["user_sessions"], content_types=['text', 'photo'])
+def handle_text_and_proofs(m):
+    uid = str(m.from_user.id)
+    session = data["user_sessions"][uid]
+    mode = session.get("mode")
+
+    if mode == "withdraw" and m.content_type == 'text':
+        upi_text = m.text.strip()
+        amt = session.get("amount", 0.0)
+        wallet = get_wallet(uid)
+        
+        if not deduct_from_wallet(uid, amt):
+            bot.reply_to(m, "❌ Insufficient balance.")
+            del data["user_sessions"][uid]
+            return
+
+        wallet["withdraw_count"] = wallet.get("withdraw_count", 0) + 1
+        is_first_time = (wallet["withdraw_count"] == 1)
+
+        del data["user_sessions"][uid]
+        w_id = str(uuid.uuid4())[:6]
+        data["withdraw_requests"][w_id] = {"user_id": int(uid), "amount": amt, "upi": upi_text}
+        save_data()
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("✅ Mark Paid", callback_data=f"wdr_app_{w_id}"),
+            types.InlineKeyboardButton("❌ Reject & Refund", callback_data=f"wdr_rej_{w_id}")
+        )
+        badge = "🌟 1st Withdrawal" if is_first_time else "🔁 Regular Withdrawal"
+        bot.send_message(ADMIN_ID, f"💸 <b>Withdraw Request ({badge}):</b>\nUser: <code>{uid}</code>\nAmount: ₹{amt:.2f}\nUPI: <code>{upi_text}</code>", reply_markup=markup, parse_mode="HTML")
+        bot.reply_to(m, f"✅ Withdrawal of ₹{amt:.2f} submitted to admin.", reply_markup=get_main_menu_markup(), parse_mode="HTML")
+        return
+
+    elif mode == "payment":
+        utr_clean = m.text.strip() if m.content_type == 'text' else None
+        
+        if utr_clean and len(utr_clean) >= 8:
+            if utr_clean in data.get("used_utrs", []):
+                bot.reply_to(m, "❌ <b>Duplicate UTR Detected!</b>\nYeh transaction number pehle se submit kiya ja chuka hai.", parse_mode="HTML")
+                return
+            data["used_utrs"].append(utr_clean)
+
+        plan_key = session.get("plan_key", "plan_49")
+        plan = PLANS.get(plan_key, {"name": "VIP Plan", "amount": 49, "days": 3})
+        del data["user_sessions"][uid]
+        req_id = str(uuid.uuid4())[:6]
+
+        data["pending_requests"][req_id] = {
+            "user_id": int(uid),
+            "plan_key": plan_key,
+            "plan_name": plan["name"],
+            "plan_days": plan["days"],
+            "amount": plan["amount"],
+            "code": session.get("code", "")
+        }
+        save_data()
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("✅ APPROVE ACCESS", callback_data=f"adm_app_{req_id}"),
+            types.InlineKeyboardButton("❌ REJECT", callback_data=f"adm_rej_{req_id}")
+        )
+        admin_caption = f"👑 <b>New Order Received!</b>\nUser: {m.from_user.first_name} (<code>{uid}</code>)\nOrder: {plan['name']} (₹{plan['amount']})\n"
+
+        if m.content_type == 'photo':
+            bot.send_photo(ADMIN_ID, m.photo[-1].file_id, caption=admin_caption + "📸 <i>Screenshot Attached</i>", reply_markup=markup, parse_mode="HTML")
         else:
-            bot.answer_callback_query(call.id, "❌ Aapne abhi tak dono channels join nahi kiye!", show_alert=True)
+            bot.send_message(ADMIN_ID, admin_caption + f"✍️ <b>UTR:</b> <code>{utr_clean}</code>", reply_markup=markup, parse_mode="HTML")
 
-    elif cd == "menu_refer":
-        ref_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
-        w = get_wallet(uid)
-        ref_text = (
-            "🎁 <b>Refer & Earn Program</b>\n\n"
-            "Apne dosto ko share karein aur har joining par <b>₹5.00 (+10 Tokens)</b> kamayein!\n\n"
-            f"👥 Total Referrals: <b>{w.get('total_ref', 0)}</b>\n"
-            f"💰 Wallet Balance: <b>₹{w.get('balance', 0.0):.2f}</b>\n\n"
-            f"🔗 <b>Aapka Invite Link:</b>\n<code>{ref_link}</code>"
-        )
-        bot.send_message(cid, ref_text, parse_mode="HTML")
+        bot.reply_to(m, "✅ <b>Payment Proof Submitted!</b>\nAdmin verify kar rahe hain. Jaldi unlock ho jayega.", reply_markup=get_main_menu_markup(), parse_mode="HTML")
+        return
 
-    elif cd == "menu_vip":
-        show_vip_plans(cid, mid, code="none")
+# ADMIN MEDIA LINK GENERATION
+@bot.message_handler(content_types=['photo', 'video', 'document', 'audio'])
+def handle_admin_media(m):
+    if not is_admin(m.from_user.id): return
+    cid = m.chat.id
+    cap = m.caption or ""
+    fid, ftype = None, None
 
-    elif cd.startswith("buy_plan_") or cd.startswith("buy_pack_"):
-        plan_key = "_".join(cd.split("_")[1:3])
-        plan = PLANS.get(plan_key, PLANS.get("plan_49"))
-        pay_text = (
-            f"💳 <b>Payment for {plan['name']}</b>\n\n"
-            f"💵 Amount: <b>₹{plan['amount']}</b>\n"
-            f"📌 UPI ID: <code>{UPI_ID}</code>\n\n"
-            "Payment karne ke baad screenshot aur UTR number support team <b>@GETSUPPORT99</b> ko send karein."
-        )
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("📩 Send Proof to Support", url="https://t.me/GETSUPPORT99"))
+    if m.content_type == 'photo':
+        fid = m.photo[-1].file_id
+        ftype = 'photo'
+    elif m.content_type == 'video':
+        fid = m.video.file_id
+        ftype = 'video'
+    elif m.content_type == 'document':
+        fid = m.document.file_id
+        ftype = 'document'
+    elif m.content_type == 'audio':
+        fid = m.audio.file_id
+        ftype = 'audio'
+
+    if fid:
+        file_info = {'file_id': fid, 'type': ftype, 'caption': cap}
+        if cid in user_batches:
+            user_batches[cid].append(file_info)
+            bot.reply_to(m, f"➕ {ftype.capitalize()} #{len(user_batches[cid])} added to batch! Send more or <code>/done</code>", parse_mode="HTML")
+        else:
+            code = str(uuid.uuid4())[:8]
+            data["files"][code] = {'files': [file_info], 'is_premium': False}
+            save_data()
+            
+            direct_clean_link = f"https://t.me/{BOT_USERNAME}?start={code}"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("⚡ Open Direct Link", url=direct_clean_link))
+
+            msg_text = (
+                f"✅ <b>{ftype.capitalize()} Link Ready!</b>\n\n"
+                f"📁 <b>Code:</b> <code>{code}</code>\n"
+                f"🔒 Set Premium Only: <code>/make_pre {code}</code>\n"
+                f"🔓 Set Free: <code>/make_free {code}</code>\n\n"
+                f"⚡ <b>Shareable Clean Link:</b>\n<code>{direct_clean_link}</code>"
+            )
+            bot.reply_to(m, msg_text, reply_markup=markup, parse_mode="HTML")
+
+bot.infinity_polling(skip_pending=True)
+EOF
+python main.py
 if __name__ == "__main__":
     print("Starting Flask Web Server...")
     keep_alive()
@@ -543,4 +975,4 @@ if __name__ == "__main__":
         except Exception as e:
             print("Polling error, retrying in 5 seconds:", e)
             time.sleep(5)
-            
+
