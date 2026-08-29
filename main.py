@@ -935,7 +935,7 @@ def handle_admin_media(m):
 
             msg_text = (
                 f"✅ <b>{ftype.capitalize()} Link Ready!</b>\n\n"
-                f"📁 <b>Code:</b> <code>{code}</code>\n"
+         f"📁 <b>Code:</b> <code>{code}</code>\n"
                 f"🔒 Set Premium Only: <code>/make_pre {code}</code>\n"
                 f"🔓 Set Free: <code>/make_free {code}</code>\n\n"
                 f"⚡ <b>Shareable Clean Link:</b>\n<code>{direct_clean_link}</code>"
@@ -943,6 +943,6 @@ def handle_admin_media(m):
             bot.reply_to(m, msg_text, reply_markup=markup, parse_mode="HTML")
 
 bot.infinity_polling(skip_pending=True)
-EOF
-python main.py
+bot.infinity_polling(skip_pending=True)
+
 
